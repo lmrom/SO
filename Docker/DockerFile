@@ -1,0 +1,9 @@
+FROM ubuntu 
+WORKDIR /docker
+COPY DockerFile ./
+RUN apt-get update &&\
+    apt-get install -y neovim &&\
+    apt-get install g++ &&\
+    useradd -m lmr
+USER lmr
+CMD ["nvim"]
