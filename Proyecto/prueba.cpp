@@ -14,8 +14,8 @@
 using namespace std;
 
 //CONFIGURACIONES DE IP
-const string IP_PI      = "10.248.161.78";
-const string IP_ESP32   = "10.248.161.38";
+const string IP_PI      = "10.29.181.78";
+const string IP_ESP32   = "10.29.181.38";
 const string USER_PI    = "lumr";
 const string RUTA_PI    = "/var/www/html/"; 
 const string puertoPreferido = "/dev/ttyACM0";
