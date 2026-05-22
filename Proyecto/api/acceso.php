@@ -4,18 +4,89 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 
 const DB_PATH = '/var/www/html/audit.db';
-const API_TOKEN = '';
+const API_TOKEN = ''; // opcional: si no quieres token, dejalo vacio
 const IDENTIFICADOR_SISTEMA = 'SYS-DENEGADO';
 const WEB_ROOT = '/var/www/html';
 const REVISION_MODE_FILE = WEB_ROOT . '/revision_mode.json';
-const FACE_VERIFY_REMOTE_URL = 'http://10.76.102.19:5050/verify'; 
-const FACE_VERIFY_REMOTE_TOKEN = ''; // opcional, mismo valor que en el server de laptop
+const FACE_VERIFY_REMOTE_URL = 'http://10.138.89.19:5050/verify'; // servicio C++ en laptop
+const FACE_VERIFY_REMOTE_TOKEN = ''; // opcional, mismo valor que en el server C++
+const FACE_VERIFY_THRESHOLD = 0.58;
 const FACE_VERIFY_TIMEOUT_SEG = 8;
+const ACCESS_DUPLICATE_WINDOW_SECONDS = 8;
+const AUTO_PENDING_TIMEOUT_SECONDS = 18;
 
 function responder(int $status, array $payload): void {
     http_response_code($status);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+function faceVerifyRemoteUrl(): string {
+    static $value = null;
+    if ($value !== null) {
+        return $value;
+    }
+    $env = trim((string)getenv('FACE_VERIFY_REMOTE_URL'));
+    if ($env !== '' && stripos($env, 'TU_LAPTOP_IP') === false) {
+        $value = $env;
+        return $value;
+    }
+    $value = FACE_VERIFY_REMOTE_URL;
+    return $value;
+}
+
+function faceVerifyRemoteToken(): string {
+    static $value = null;
+    if ($value !== null) {
+        return $value;
+    }
+    $value = (string)getenv('FACE_VERIFY_REMOTE_TOKEN');
+    if ($value === '') {
+        $value = FACE_VERIFY_REMOTE_TOKEN;
+    }
+    return $value;
+}
+
+function faceVerifyThreshold(): float {
+    static $value = null;
+    if ($value !== null) {
+        return $value;
+    }
+    $raw = trim((string)getenv('FACE_VERIFY_THRESHOLD'));
+    if ($raw === '') {
+        $value = FACE_VERIFY_THRESHOLD;
+        return $value;
+    }
+    if (!is_numeric($raw)) {
+        $value = FACE_VERIFY_THRESHOLD;
+        return $value;
+    }
+    $parsed = (float)$raw;
+    if ($parsed < 0.0 || $parsed > 1.0) {
+        $value = FACE_VERIFY_THRESHOLD;
+        return $value;
+    }
+    $value = $parsed;
+    return $value;
+}
+
+function faceVerifyTimeoutSeg(): int {
+    static $value = null;
+    if ($value !== null) {
+        return $value;
+    }
+    $raw = trim((string)getenv('FACE_VERIFY_TIMEOUT_SEG'));
+    if ($raw === '' || !ctype_digit($raw)) {
+        $value = FACE_VERIFY_TIMEOUT_SEG;
+        return $value;
+    }
+    $parsed = (int)$raw;
+    if ($parsed < 1 || $parsed > 30) {
+        $value = FACE_VERIFY_TIMEOUT_SEG;
+        return $value;
+    }
+    $value = $parsed;
+    return $value;
 }
 
 function normalizarUid(string $uid): string {
@@ -60,12 +131,44 @@ function normalizarRutaPublica(?string $ruta): ?string {
     return '/' . ltrim($ruta, '/');
 }
 
+function normalizarFotoReferenciaDb(?string $ruta): ?string {
+    // Se respeta completamente la ruta guardada en Personas.foto_url.
+    return normalizarRutaPublica($ruta);
+}
+
 function quitarFotoEnObservacion(string $observacion): string {
     return preg_replace('/\s+\|\s+Foto:\s+.*$/u', '', $observacion) ?? $observacion;
 }
 
 function quitarRevisionEnObservacion(string $observacion): string {
     return preg_replace('/\s+\|\s+Revision:\s+.*$/u', '', $observacion) ?? $observacion;
+}
+
+function extraerMotivoDesdeObservacion(string $observacion): string {
+    if (preg_match('/Motivo:\s*([^|]+)/i', $observacion, $m) === 1) {
+        return trim($m[1]);
+    }
+    return '';
+}
+
+function marcarFalloAutoEnRegistro(PDO $pdo, int $idRegistro, string $motivo, string $observacionBase): void {
+    $comentario = 'AUTO_FALLA: ' . $motivo;
+    $obsBase = quitarRevisionEnObservacion($observacionBase);
+    $obsNueva = rtrim($obsBase) . ' | Revision: ' . $comentario;
+    $st = $pdo->prepare(
+        "UPDATE Accesos
+         SET revision_comentario = :revision_comentario,
+             revisado_por = 'AUTO_FACE_ID',
+             fecha_revision = CURRENT_TIMESTAMP,
+             observacion = :observacion
+         WHERE id_registro = :id_registro
+           AND revision_estado = 'PENDIENTE'"
+    );
+    $st->execute([
+        ':revision_comentario' => $comentario,
+        ':observacion' => $obsNueva,
+        ':id_registro' => $idRegistro
+    ]);
 }
 
 function modoRevisionValido(string $modo): string {
@@ -117,9 +220,91 @@ function resolverRutaLocal(?string $ruta): ?string {
     return WEB_ROOT . $ruta;
 }
 
+function resolverRutaFotoReferenciaDb(?string $ruta): ?string {
+    // Para comparación automática, usamos exactamente foto_url de DB en ruta local.
+    return resolverRutaLocal($ruta);
+}
+
+function healthUrlDesdeVerifyUrl(string $verifyUrl): string {
+    $healthUrl = preg_replace('#/verify/?$#', '/health', $verifyUrl);
+    if (!is_string($healthUrl) || $healthUrl === '') {
+        return $verifyUrl;
+    }
+    return $healthUrl;
+}
+
+function diagnosticarAutoFace(): array {
+    $verifyUrl = trim(faceVerifyRemoteUrl());
+    if ($verifyUrl === '') {
+        return ['ok' => false, 'motivo' => 'FACE_VERIFY_REMOTE_URL_VACIA', 'health_url' => null];
+    }
+    if (stripos($verifyUrl, 'TU_LAPTOP_IP') !== false) {
+        return ['ok' => false, 'motivo' => 'FACE_VERIFY_REMOTE_URL_PLACEHOLDER', 'health_url' => null];
+    }
+    if (filter_var($verifyUrl, FILTER_VALIDATE_URL) === false) {
+        return ['ok' => false, 'motivo' => 'FACE_VERIFY_REMOTE_URL_INVALIDA', 'health_url' => null];
+    }
+    if (!function_exists('curl_init')) {
+        return ['ok' => false, 'motivo' => 'CURL_NO_DISPONIBLE', 'health_url' => null];
+    }
+
+    $healthUrl = healthUrlDesdeVerifyUrl($verifyUrl);
+    $ch = curl_init($healthUrl);
+    if ($ch === false) {
+        return ['ok' => false, 'motivo' => 'NO_SE_PUDO_INICIAR_CURL', 'health_url' => $healthUrl];
+    }
+
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_TIMEOUT => 3,
+        CURLOPT_HTTPHEADER => ['Accept: application/json'],
+    ]);
+    $raw = curl_exec($ch);
+    $errno = curl_errno($ch);
+    $error = curl_error($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+
+    if ($errno !== 0 || !is_string($raw) || trim($raw) === '') {
+        return [
+            'ok' => false,
+            'motivo' => 'ERROR_CONEXION_FACE_REMOTO',
+            'health_url' => $healthUrl,
+            'detalle' => $error
+        ];
+    }
+    if ($httpCode >= 400) {
+        return [
+            'ok' => false,
+            'motivo' => 'HTTP_FACE_REMOTO_' . $httpCode,
+            'health_url' => $healthUrl
+        ];
+    }
+
+    $json = json_decode($raw, true);
+    if (!is_array($json) || (($json['ok'] ?? false) !== true)) {
+        return [
+            'ok' => false,
+            'motivo' => 'HEALTH_FACE_REMOTO_INVALIDO',
+            'health_url' => $healthUrl
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'motivo' => 'AUTO_FACE_ID_DISPONIBLE',
+        'health_url' => $healthUrl
+    ];
+}
+
 function ejecutarComparacionFacial(string $fotoReferencia, string $fotoCapturada): array {
-    $rutaRef = resolverRutaLocal($fotoReferencia);
+    $rutaRef = resolverRutaFotoReferenciaDb($fotoReferencia);
     $rutaCap = resolverRutaLocal($fotoCapturada);
+    $verifyUrl = faceVerifyRemoteUrl();
+    $remoteToken = faceVerifyRemoteToken();
+    $threshold = faceVerifyThreshold();
+    $timeoutSeg = faceVerifyTimeoutSeg();
 
     if ($rutaRef === null || $rutaCap === null) {
         return ['ok' => false, 'motivo' => 'RUTA_FOTO_INVALIDA'];
@@ -130,8 +315,11 @@ function ejecutarComparacionFacial(string $fotoReferencia, string $fotoCapturada
     if (!is_file($rutaCap)) {
         return ['ok' => false, 'motivo' => 'FOTO_CAPTURADA_NO_EXISTE'];
     }
-    if (FACE_VERIFY_REMOTE_URL === '') {
+    if ($verifyUrl === '') {
         return ['ok' => false, 'motivo' => 'FACE_VERIFY_REMOTE_URL_VACIA'];
+    }
+    if (stripos($verifyUrl, 'TU_LAPTOP_IP') !== false) {
+        return ['ok' => false, 'motivo' => 'FACE_VERIFY_REMOTE_URL_PLACEHOLDER'];
     }
     if (!function_exists('curl_init')) {
         return ['ok' => false, 'motivo' => 'CURL_NO_DISPONIBLE'];
@@ -143,12 +331,13 @@ function ejecutarComparacionFacial(string $fotoReferencia, string $fotoCapturada
     $payload = [
         'reference' => new CURLFile($rutaRef),
         'captured' => new CURLFile($rutaCap),
+        'threshold' => (string)$threshold,
     ];
-    if (FACE_VERIFY_REMOTE_TOKEN !== '') {
-        $payload['token'] = FACE_VERIFY_REMOTE_TOKEN;
+    if ($remoteToken !== '') {
+        $payload['token'] = $remoteToken;
     }
 
-    $ch = curl_init(FACE_VERIFY_REMOTE_URL);
+    $ch = curl_init($verifyUrl);
     if ($ch === false) {
         return ['ok' => false, 'motivo' => 'NO_SE_PUDO_INICIAR_CURL'];
     }
@@ -158,7 +347,7 @@ function ejecutarComparacionFacial(string $fotoReferencia, string $fotoCapturada
         CURLOPT_POSTFIELDS => $payload,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 3,
-        CURLOPT_TIMEOUT => FACE_VERIFY_TIMEOUT_SEG,
+        CURLOPT_TIMEOUT => $timeoutSeg,
         CURLOPT_HTTPHEADER => ['Accept: application/json'],
     ]);
 
@@ -174,7 +363,7 @@ function ejecutarComparacionFacial(string $fotoReferencia, string $fotoCapturada
         return ['ok' => false, 'motivo' => 'HTTP_FACE_REMOTO_' . $httpCode];
     }
 
-    $json = json_decode($raw, true);
+    $json = json_decode(trim($raw), true);
     if (!is_array($json) || !array_key_exists('ok', $json)) {
         return ['ok' => false, 'motivo' => 'RESPUESTA_FACE_ID_INVALIDA'];
     }
@@ -201,32 +390,8 @@ function ejecutarComparacionFacial(string $fotoReferencia, string $fotoCapturada
 }
 
 function autoFaceDisponible(): bool {
-    if (FACE_VERIFY_REMOTE_URL === '' || !function_exists('curl_init')) {
-        return false;
-    }
-    $healthUrl = preg_replace('#/verify/?$#', '/health', FACE_VERIFY_REMOTE_URL);
-    if (!is_string($healthUrl) || $healthUrl === '') {
-        $healthUrl = FACE_VERIFY_REMOTE_URL;
-    }
-    $ch = curl_init($healthUrl);
-    if ($ch === false) {
-        return false;
-    }
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 2,
-        CURLOPT_TIMEOUT => 3,
-        CURLOPT_HTTPHEADER => ['Accept: application/json'],
-    ]);
-    $raw = curl_exec($ch);
-    $errno = curl_errno($ch);
-    $httpCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    curl_close($ch);
-    if ($errno !== 0 || $httpCode >= 400 || !is_string($raw) || trim($raw) === '') {
-        return false;
-    }
-    $json = json_decode($raw, true);
-    return is_array($json) && (($json['ok'] ?? false) === true);
+    $diag = diagnosticarAutoFace();
+    return (($diag['ok'] ?? false) === true);
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -280,7 +445,8 @@ try {
 
     if ($accion === 'OBTENER_MODO_REVISION') {
         $modo = obtenerModoRevision();
-        $autoDisponible = autoFaceDisponible();
+        $diagAuto = diagnosticarAutoFace();
+        $autoDisponible = (($diagAuto['ok'] ?? false) === true);
         if (!$autoDisponible && $modo === 'AUTO') {
             $modo = 'MANUAL';
             guardarModoRevision($modo);
@@ -288,19 +454,22 @@ try {
         responder(200, [
             'ok' => true,
             'modo_revision' => $modo,
-            'auto_disponible' => $autoDisponible
+            'auto_disponible' => $autoDisponible,
+            'auto_diagnostico' => $diagAuto
         ]);
     }
 
     if ($accion === 'CAMBIAR_MODO_REVISION') {
-        $autoDisponible = autoFaceDisponible();
+        $diagAuto = diagnosticarAutoFace();
+        $autoDisponible = (($diagAuto['ok'] ?? false) === true);
         $modoNuevo = modoRevisionValido((string)($_POST['modo_revision'] ?? 'MANUAL'));
         if ($modoNuevo === 'AUTO' && !$autoDisponible) {
             responder(200, [
                 'ok' => false,
                 'motivo' => 'AUTO_FACE_ID_NO_DISPONIBLE',
                 'modo_revision' => 'MANUAL',
-                'auto_disponible' => false
+                'auto_disponible' => false,
+                'auto_diagnostico' => $diagAuto
             ]);
         }
         if (!guardarModoRevision($modoNuevo)) {
@@ -312,7 +481,8 @@ try {
         responder(200, [
             'ok' => true,
             'modo_revision' => $modoNuevo,
-            'auto_disponible' => $autoDisponible
+            'auto_disponible' => $autoDisponible,
+            'auto_diagnostico' => $diagAuto
         ]);
     }
 
@@ -381,15 +551,18 @@ try {
                 $revisionEstadoActual = (string)($datoAuto['revision_estado'] ?? 'NO_REQUERIDA');
                 $fotoReferencia = (string)($datoAuto['foto_referencia'] ?? '');
                 $fotoCapturada = extraerFotoDesdeObservacion((string)($datoAuto['observacion'] ?? ''));
+                $observacionAutoActual = (string)($datoAuto['observacion'] ?? '');
 
                 if ($revisionEstadoActual !== 'PENDIENTE') {
                     $autoRevision['motivo'] = 'REGISTRO_NO_PENDIENTE';
                 } elseif ($fotoReferencia === '' || $fotoCapturada === null) {
                     $autoRevision['motivo'] = 'FOTOS_INSUFICIENTES';
+                    marcarFalloAutoEnRegistro($pdo, $idRegistro, $autoRevision['motivo'], $observacionAutoActual);
                 } else {
                     $resultadoFace = ejecutarComparacionFacial($fotoReferencia, $fotoCapturada);
                     if (!($resultadoFace['ok'] ?? false)) {
                         $autoRevision['motivo'] = (string)($resultadoFace['motivo'] ?? 'FACE_ID_NO_DISPONIBLE');
+                        marcarFalloAutoEnRegistro($pdo, $idRegistro, $autoRevision['motivo'], $observacionAutoActual);
                     } else {
                         $match = (bool)($resultadoFace['match'] ?? false);
                         $distance = $resultadoFace['distance'] ?? null;
@@ -447,13 +620,52 @@ try {
         ]);
     }
 
+    if ($accion === 'MARCAR_FALLO_AUTO') {
+        $idRegistro = (int)($_POST['id_registro'] ?? 0);
+        $motivo = trim((string)($_POST['motivo'] ?? 'CAPTURA_FALLIDA'));
+        if ($idRegistro <= 0) {
+            responder(400, [
+                'ok' => false,
+                'motivo' => 'ID_REGISTRO_INVALIDO'
+            ]);
+        }
+
+        $stSel = $pdo->prepare('SELECT revision_estado, observacion FROM Accesos WHERE id_registro = :id_registro LIMIT 1');
+        $stSel->execute([':id_registro' => $idRegistro]);
+        $row = $stSel->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            responder(404, [
+                'ok' => false,
+                'motivo' => 'REGISTRO_NO_ENCONTRADO'
+            ]);
+        }
+
+        $estado = (string)($row['revision_estado'] ?? '');
+        if ($estado !== 'PENDIENTE') {
+            responder(200, [
+                'ok' => true,
+                'motivo' => 'REVISION_NO_PENDIENTE',
+                'id_registro' => $idRegistro
+            ]);
+        }
+
+        marcarFalloAutoEnRegistro($pdo, $idRegistro, $motivo, (string)($row['observacion'] ?? ''));
+        responder(200, [
+            'ok' => true,
+            'motivo' => 'FALLO_AUTO_MARCADO',
+            'id_registro' => $idRegistro
+        ]);
+    }
+
     if ($accion === 'LISTAR_PENDIENTES') {
         $st = $pdo->prepare(
             "SELECT
                 a.id_registro,
                 a.fecha_hora,
                 a.tipo,
+                a.revision_comentario,
                 a.observacion,
+                CAST((julianday('now','localtime') - julianday(a.fecha_hora)) * 86400.0 AS INTEGER) AS edad_seg,
                 p.identificador,
                 p.nombre,
                 p.apellido,
@@ -476,6 +688,22 @@ try {
         $pendientes = [];
         foreach ($rows as $row) {
             $observacion = (string)($row['observacion'] ?? '');
+            $revisionComentario = (string)($row['revision_comentario'] ?? '');
+            $edadSeg = isset($row['edad_seg']) ? (int)$row['edad_seg'] : 0;
+            $autoEstado = 'PENDIENTE';
+            $autoMensaje = '';
+            if ($revisionComentario !== '' && str_starts_with($revisionComentario, 'AUTO_FALLA:')) {
+                $autoEstado = 'FALLA';
+                $autoMensaje = trim(substr($revisionComentario, strlen('AUTO_FALLA:')));
+            } elseif (extraerFotoDesdeObservacion($observacion) === null) {
+                $autoEstado = 'CAPTURANDO';
+            } else {
+                $autoEstado = 'PROCESANDO';
+            }
+            if (($autoEstado === 'CAPTURANDO' || $autoEstado === 'PROCESANDO') && $edadSeg >= AUTO_PENDING_TIMEOUT_SECONDS) {
+                $autoEstado = 'FALLA';
+                $autoMensaje = 'AUTO_TIMEOUT';
+            }
             $uidFila = trim((string)($row['uid'] ?? ''));
             if ($uidFila === '') {
                 $uidFila = extraerUidDesdeObservacion($observacion);
@@ -490,9 +718,11 @@ try {
                 'tipo_persona' => (string)$row['tipo_persona'],
                 'puerta' => (string)$row['puerta'],
                 'ubicacion' => (string)$row['ubicacion'],
-                'foto_registrada' => normalizarRutaPublica((string)($row['foto_url'] ?? '')),
+                'foto_registrada' => normalizarFotoReferenciaDb((string)($row['foto_url'] ?? '')),
                 'foto_capturada' => extraerFotoDesdeObservacion($observacion),
                 'observacion' => $observacion,
+                'auto_estado' => $autoEstado,
+                'auto_mensaje' => $autoMensaje,
             ];
         }
 
@@ -689,6 +919,68 @@ try {
     $observacion = ($requiereRevision ? 'PERMITIDO_PRELIMINAR' : 'DENEGADO') .
                    ' | UID: ' . $uid .
                    ' | Motivo: ' . $motivo;
+
+    // Evita registros duplicados cuando el lector dispara el mismo UID varias veces seguidas.
+    $stDup = $pdo->prepare(
+        'SELECT
+            id_registro,
+            id_persona,
+            autorizado,
+            revision_estado,
+            observacion,
+            fecha_hora
+         FROM Accesos
+         WHERE id_puerta = :id_puerta
+           AND tipo = :tipo
+           AND (
+                (:id_credencial_nula = 0 AND id_credencial = :id_credencial)
+                OR
+                (:id_credencial_nula = 1 AND id_credencial IS NULL AND observacion LIKE :uid_like)
+           )
+           AND ((julianday(\'now\') - julianday(fecha_hora)) * 86400.0) <= :window_seg
+         ORDER BY id_registro DESC
+         LIMIT 1'
+    );
+    $stDup->bindValue(':id_puerta', $idPuerta, PDO::PARAM_INT);
+    $stDup->bindValue(':tipo', $tipo, PDO::PARAM_STR);
+    $stDup->bindValue(':id_credencial_nula', $idCredencialRegistro === null ? 1 : 0, PDO::PARAM_INT);
+    if ($idCredencialRegistro === null) {
+        $stDup->bindValue(':id_credencial', 0, PDO::PARAM_INT);
+    } else {
+        $stDup->bindValue(':id_credencial', $idCredencialRegistro, PDO::PARAM_INT);
+    }
+    $stDup->bindValue(':uid_like', '%UID: ' . $uid . ' |%', PDO::PARAM_STR);
+    $stDup->bindValue(':window_seg', ACCESS_DUPLICATE_WINDOW_SECONDS, PDO::PARAM_INT);
+    $stDup->execute();
+    $duplicado = $stDup->fetch(PDO::FETCH_ASSOC);
+
+    if ($duplicado) {
+        $pdo->commit();
+
+        $revisionEstadoDup = (string)($duplicado['revision_estado'] ?? 'NO_REQUERIDA');
+        $requiereRevisionDup = $revisionEstadoDup === 'PENDIENTE';
+        $autorizadoDup = ((int)($duplicado['autorizado'] ?? 0) === 1);
+        $motivoDup = extraerMotivoDesdeObservacion((string)($duplicado['observacion'] ?? ''));
+        if ($motivoDup === '') {
+            $motivoDup = $motivo;
+        }
+
+        responder(200, [
+            'ok' => true,
+            'autorizado' => $autorizadoDup,
+            'autorizado_final' => $requiereRevisionDup ? false : $autorizadoDup,
+            'decision_final' => !$requiereRevisionDup,
+            'requiere_revision' => $requiereRevisionDup,
+            'modo_revision' => obtenerModoRevision(),
+            'registrado' => true,
+            'motivo' => $motivoDup,
+            'id_registro' => (int)$duplicado['id_registro'],
+            'id_persona' => (int)$duplicado['id_persona'],
+            'fecha_hora' => (string)($duplicado['fecha_hora'] ?? ''),
+            'duplicado' => true,
+            'nombre' => $uidRegistrado ? trim((string)$fila['nombre'] . ' ' . (string)$fila['apellido']) : 'NO_REGISTRADO'
+        ]);
+    }
 
     $ins = $pdo->prepare(
         'INSERT INTO Accesos (
