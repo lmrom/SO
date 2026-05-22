@@ -317,82 +317,252 @@ try {
       font-size: .92rem;
     }
 
+    .review-monitor {
+      margin-top: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #eef7ff;
+      border: 1px solid #c7dcf2;
+      color: #325272;
+      font-size: .85rem;
+      font-weight: 600;
+    }
+    .review-controls {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    .mode-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid #c8d7e8;
+      background: #ffffff;
+      box-shadow: 0 6px 14px rgba(13, 40, 71, 0.07);
+      font-size: .88rem;
+      font-weight: 600;
+      color: #244867;
+    }
+    .mode-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid #c8d7e8;
+      border-radius: 12px;
+      padding: 8px 10px;
+      box-shadow: 0 6px 14px rgba(13, 40, 71, 0.07);
+    }
+    .mode-switch label {
+      font-size: .84rem;
+      color: #416282;
+      font-weight: 700;
+      letter-spacing: .2px;
+      text-transform: uppercase;
+    }
+    .mode-switch select {
+      min-width: 130px;
+      width: auto;
+      padding: 7px 10px;
+      font-size: .88rem;
+      border-radius: 9px;
+      margin: 0;
+    }
+    .review-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #2f90e7;
+      box-shadow: 0 0 0 5px rgba(47, 144, 231, 0.22);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.18); opacity: 0.7; }
+    }
+
     .overlay {
       position: fixed;
       inset: 0;
-      background: rgba(7, 19, 36, 0.72);
+      background: rgba(7, 19, 36, 0.74);
+      backdrop-filter: blur(2px);
       display: none;
       align-items: center;
       justify-content: center;
       z-index: 9999;
-      padding: 14px;
+      padding: 20px;
     }
     .overlay.visible {
       display: flex;
     }
-    .modal {
-      width: min(980px, 96vw);
-      background: #fff;
-      border-radius: 18px;
-      border: 1px solid #d8e3ee;
-      box-shadow: 0 18px 60px rgba(5, 15, 35, 0.35);
+    .auto-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 19, 36, 0.62);
+      backdrop-filter: blur(2px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9998;
+      padding: 20px;
+    }
+    .auto-overlay.visible {
+      display: flex;
+    }
+    .auto-box {
+      width: min(520px, 95vw);
+      background: #ffffff;
+      border: 1px solid #c8d7e8;
+      border-radius: 16px;
       padding: 18px;
+      box-shadow: 0 18px 44px rgba(5, 15, 35, 0.32);
+      text-align: center;
+    }
+    .auto-spinner {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 4px solid #d2e4f6;
+      border-top-color: #0b63ce;
+      margin: 4px auto 12px;
+      animation: spin 1s linear infinite;
+    }
+    .auto-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #1d3755;
+      margin-bottom: 6px;
+    }
+    .auto-msg {
+      color: #4e6782;
+      font-size: .93rem;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .modal {
+      width: min(1080px, 97vw);
+      background: linear-gradient(180deg, #f7fcff 0%, #f0f5fb 100%);
+      border-radius: 20px;
+      border: 1px solid #cad8e8;
+      box-shadow: 0 24px 64px rgba(5, 15, 35, 0.36);
+      padding: 20px;
     }
     .modal h2 {
-      margin: 0 0 8px;
-      font-size: 1.35rem;
+      margin: 0 0 6px;
+      font-size: clamp(1.2rem, 2vw, 1.55rem);
+      letter-spacing: 0.2px;
     }
     .modal p {
       margin: 0;
-      color: var(--muted);
+      color: #3f607f;
       font-size: .95rem;
+    }
+    .modal-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .pill-pending {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #f0cc8e;
+      background: #fff5e3;
+      color: #9b5d00;
+      border-radius: 999px;
+      padding: 6px 11px;
+      font-size: .78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .pill-pending::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f09a15;
     }
     .modal-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      gap: 16px;
       margin-top: 14px;
     }
     .photo-card {
-      border: 1px solid #d9e4ee;
-      border-radius: 14px;
-      padding: 10px;
-      background: #f9fcff;
+      border: 1px solid #cdd8e8;
+      border-radius: 16px;
+      padding: 14px;
+      background: #ffffff;
+      box-shadow: 0 8px 20px rgba(13, 40, 71, 0.08);
     }
     .photo-card strong {
       display: block;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
+      text-align: center;
+      letter-spacing: 0.4px;
+      color: #1b3552;
     }
     .photo-large {
       width: 100%;
-      aspect-ratio: 4 / 3;
+      aspect-ratio: 5 / 4;
       object-fit: cover;
-      border: 1px solid #cfdbe8;
-      border-radius: 10px;
+      border: 1px solid #cdd8e8;
+      border-radius: 12px;
       background: #eef4f9;
     }
     .modal-actions {
       display: flex;
-      gap: 10px;
-      margin-top: 14px;
+      gap: 16px;
+      margin-top: 16px;
+      justify-content: center;
     }
     .btn-allow {
-      background: #0e9b57;
+      background: linear-gradient(180deg, #38d839 0%, #14b931 100%);
+      max-width: 260px;
+      min-height: 52px;
+      font-size: 1.05rem;
+      letter-spacing: .4px;
+      box-shadow: 0 8px 18px rgba(33, 157, 55, 0.35);
     }
     .btn-deny {
-      background: #c73d35;
+      background: linear-gradient(180deg, #ff5050 0%, #df1515 100%);
+      max-width: 260px;
+      min-height: 52px;
+      font-size: 1.05rem;
+      letter-spacing: .4px;
+      box-shadow: 0 8px 18px rgba(199, 61, 53, 0.33);
+    }
+    .btn-allow:disabled,
+    .btn-deny:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+      box-shadow: none;
     }
     .modal small {
       display: block;
-      margin-top: 10px;
+      margin-top: 12px;
       color: #63788e;
+      text-align: center;
     }
 
     @media (max-width: 900px) {
       .filters { grid-template-columns: 1fr; }
       table { display: block; overflow-x: auto; }
       .modal-grid { grid-template-columns: 1fr; }
-      .modal-actions { flex-direction: column; }
+      .modal-actions { flex-direction: column; align-items: center; }
+      .btn-allow, .btn-deny { max-width: 100%; }
     }
   </style>
 </head>
@@ -439,6 +609,20 @@ try {
       </select>
       <button type="submit">Aplicar</button>
     </form>
+    <div class="review-monitor">
+      <span class="review-dot"></span>
+      <span id="reviewStatusText">Monitoreando revisiones pendientes...</span>
+    </div>
+    <div class="review-controls">
+      <div class="mode-chip">Modo de revisión: <strong id="reviewModeBadge">Cargando...</strong></div>
+      <div class="mode-switch">
+        <label for="reviewModeSelect">Switch</label>
+        <select id="reviewModeSelect">
+          <option value="MANUAL">Manual</option>
+          <option value="AUTO">Automática Face ID</option>
+        </select>
+      </div>
+    </div>
 
     <table>
       <thead>
@@ -520,38 +704,63 @@ try {
 
   <div id="reviewOverlay" class="overlay" aria-hidden="true">
     <div class="modal">
-      <h2>Revisión Manual de Identidad</h2>
-      <p id="reviewInfo">Compara la foto registrada con la foto recién capturada.</p>
+      <div class="modal-top">
+        <div>
+          <h2>Panel de Decisión Manual</h2>
+          <p id="reviewInfo">Compara la foto registrada con la foto recién capturada.</p>
+        </div>
+        <span class="pill-pending">Pendiente</span>
+      </div>
 
       <div class="modal-grid">
         <div class="photo-card">
-          <strong>Foto Registrada</strong>
+          <strong>FOTO BASE DE DATOS</strong>
           <img id="fotoRegistrada" class="photo-large" alt="Foto registrada">
         </div>
         <div class="photo-card">
-          <strong>Foto Capturada Ahora</strong>
+          <strong>FOTO ACTUAL ACCESO</strong>
           <img id="fotoCapturada" class="photo-large" alt="Foto capturada">
         </div>
       </div>
 
       <div class="modal-actions">
-        <button id="btnPermitir" class="btn-allow" type="button">Permitir</button>
-        <button id="btnDenegar" class="btn-deny" type="button">Denegar</button>
+        <button id="btnDenegar" class="btn-deny" type="button">DENEGAR</button>
+        <button id="btnPermitir" class="btn-allow" type="button">ACEPTAR</button>
       </div>
       <small id="reviewMeta"></small>
     </div>
   </div>
 
+  <div id="autoOverlay" class="auto-overlay" aria-hidden="true">
+    <div class="auto-box">
+      <div id="autoSpinner" class="auto-spinner"></div>
+      <div class="auto-title" id="autoTitle">Verificando Face ID...</div>
+      <div class="auto-msg" id="autoMessage">Procesando validación automática, espera unos segundos.</div>
+    </div>
+  </div>
+
   <script>
-    const API_URL = 'acceso.php';
+    const API_CANDIDATES = [
+      'acceso.php',
+      '/acceso.php',
+      'api/acceso.php',
+      '/api/acceso.php'
+    ];
     // Si definiste un token en acceso.php, ponlo aquí también
     const API_TOKEN = ''; 
 
     const OVERLAY = document.getElementById('reviewOverlay');
+    const AUTO_OVERLAY = document.getElementById('autoOverlay');
+    const AUTO_SPINNER = document.getElementById('autoSpinner');
+    const AUTO_TITLE = document.getElementById('autoTitle');
+    const AUTO_MESSAGE = document.getElementById('autoMessage');
     const FOTO_REG = document.getElementById('fotoRegistrada');
     const FOTO_CAP = document.getElementById('fotoCapturada');
     const REVIEW_INFO = document.getElementById('reviewInfo');
     const REVIEW_META = document.getElementById('reviewMeta');
+    const REVIEW_STATUS = document.getElementById('reviewStatusText');
+    const REVIEW_MODE_BADGE = document.getElementById('reviewModeBadge');
+    const REVIEW_MODE_SELECT = document.getElementById('reviewModeSelect');
     const BTN_PERMITIR = document.getElementById('btnPermitir');
     const BTN_DENEGAR = document.getElementById('btnDenegar');
 
@@ -564,19 +773,70 @@ try {
 
     let itemActual = null;
     let revisando = false;
+    let apiUrlResuelta = null;
+    let cambiandoModo = false;
+    let autoFallbackMostradoPara = null;
+
+    function textoDiagnosticoAuto(data) {
+      const diag = data && typeof data === 'object' ? data.auto_diagnostico : null;
+      if (!diag || typeof diag !== 'object') {
+        return '';
+      }
+      const motivo = diag.motivo ? `Motivo: ${diag.motivo}` : '';
+      const health = diag.health_url ? ` · Health: ${diag.health_url}` : '';
+      return `${motivo}${health}`.trim();
+    }
 
     function setButtonState(disabled) {
       BTN_PERMITIR.disabled = disabled;
       BTN_DENEGAR.disabled = disabled;
     }
 
-    async function postApi(data) {
+    function setReviewStatus(texto) {
+      REVIEW_STATUS.textContent = texto;
+    }
+
+    function mostrarAutoOverlay(titulo, mensaje, mostrarSpinner = true) {
+      AUTO_TITLE.textContent = titulo;
+      AUTO_MESSAGE.textContent = mensaje;
+      AUTO_SPINNER.style.display = mostrarSpinner ? 'block' : 'none';
+      AUTO_OVERLAY.classList.add('visible');
+      AUTO_OVERLAY.setAttribute('aria-hidden', 'false');
+    }
+
+    function ocultarAutoOverlay() {
+      AUTO_OVERLAY.classList.remove('visible');
+      AUTO_OVERLAY.setAttribute('aria-hidden', 'true');
+      AUTO_SPINNER.style.display = 'block';
+    }
+
+    function aplicarModoRevision(modo, autoDisponible = true) {
+      const normalizado = (modo || 'MANUAL').toUpperCase() === 'AUTO' ? 'AUTO' : 'MANUAL';
+      REVIEW_MODE_BADGE.textContent = normalizado === 'AUTO' ? 'AUTO FACE ID' : 'MANUAL';
+      REVIEW_MODE_SELECT.value = normalizado;
+      const optAuto = REVIEW_MODE_SELECT.querySelector('option[value="AUTO"]');
+      if (optAuto) {
+        optAuto.disabled = !autoDisponible;
+        if (!autoDisponible && normalizado === 'AUTO') {
+          REVIEW_MODE_BADGE.textContent = 'MANUAL (AUTO no disponible)';
+          REVIEW_MODE_SELECT.value = 'MANUAL';
+        }
+      }
+    }
+
+    function construirUrlsApi() {
+      const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+      const absolutas = API_CANDIDATES.map((ruta) => new URL(ruta, base).toString());
+      return [...new Set(absolutas)];
+    }
+
+    async function intentarPost(url, data) {
       const params = new URLSearchParams(data);
       if (API_TOKEN && !params.has('token')) {
           params.append('token', API_TOKEN);
       }
 
-      const resp = await fetch(API_URL, {
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString()
@@ -590,7 +850,77 @@ try {
       return json;
     }
 
+    async function postApi(data) {
+      if (apiUrlResuelta) {
+        return intentarPost(apiUrlResuelta, data);
+      }
+
+      const urls = construirUrlsApi();
+      let ultimoError = null;
+
+      for (const url of urls) {
+        try {
+          const res = await intentarPost(url, data);
+          apiUrlResuelta = url;
+          setReviewStatus('Conexión API activa: ' + new URL(url).pathname);
+          return res;
+        } catch (err) {
+          ultimoError = err;
+        }
+      }
+      throw ultimoError || new Error('No se pudo conectar con la API');
+    }
+
+    async function cargarModoRevision() {
+      try {
+        const data = await postApi({ accion: 'OBTENER_MODO_REVISION' });
+        if (data.ok) {
+          aplicarModoRevision(data.modo_revision || 'MANUAL', Boolean(data.auto_disponible));
+          if (!Boolean(data.auto_disponible)) {
+            const diagTxt = textoDiagnosticoAuto(data);
+            if (diagTxt) {
+              setReviewStatus(`AUTO no disponible. ${diagTxt}`);
+            }
+          }
+        } else {
+          aplicarModoRevision('MANUAL', false);
+        }
+      } catch (_) {
+        aplicarModoRevision('MANUAL', false);
+      }
+    }
+
+    async function cambiarModoRevision(modo) {
+      if (cambiandoModo) {
+        return;
+      }
+      cambiandoModo = true;
+      REVIEW_MODE_SELECT.disabled = true;
+      try {
+        const data = await postApi({
+          accion: 'CAMBIAR_MODO_REVISION',
+          modo_revision: modo
+        });
+        if (!data.ok) {
+          const diagTxt = textoDiagnosticoAuto(data);
+          alert('No se pudo cambiar el modo de revisión' + (diagTxt ? `\n${diagTxt}` : ''));
+        }
+        aplicarModoRevision(data.modo_revision || 'MANUAL', Boolean(data.auto_disponible));
+        const diagTxt = textoDiagnosticoAuto(data);
+        setReviewStatus(
+          `Modo de revisión activo: ${data.modo_revision || 'MANUAL'}`
+          + (!Boolean(data.auto_disponible) && diagTxt ? ` · ${diagTxt}` : '')
+        );
+      } catch (_) {
+        alert('Error de red al cambiar modo de revisión');
+      } finally {
+        REVIEW_MODE_SELECT.disabled = false;
+        cambiandoModo = false;
+      }
+    }
+
     function abrirModal(item) {
+      ocultarAutoOverlay();
       itemActual = item;
       REVIEW_INFO.textContent = `UID ${item.uid || '-'} · ${item.nombre || 'N/D'} · ${item.tipo_persona || ''}`;
       REVIEW_META.textContent = `Registro #${item.id_registro} · ${item.fecha_hora || ''} · ${item.puerta || ''}`;
@@ -632,22 +962,102 @@ try {
         window.location.reload();
       } catch (e) {
         alert('Error de red al resolver revisión');
+        setReviewStatus('Error resolviendo revisión. Reintentando...');
         setButtonState(false);
       }
     }
 
     async function revisarPendientes() {
-      if (revisando || OVERLAY.classList.contains('visible')) {
+      if (revisando) {
         return;
       }
       revisando = true;
       try {
+        // Si hay modal abierto, primero revisa si ya se resolvio automaticamente.
+        if (OVERLAY.classList.contains('visible') && itemActual && itemActual.id_registro) {
+          const estado = await postApi({
+            accion: 'ESTADO_REVISION',
+            id_registro: String(itemActual.id_registro)
+          });
+          if (estado.ok && Boolean(estado.finalizada)) {
+            cerrarModal();
+            window.location.reload();
+            return;
+          }
+        }
+
         const data = await postApi({ accion: 'LISTAR_PENDIENTES' });
-        if (data.ok && Array.isArray(data.pendientes) && data.pendientes.length > 0) {
-          abrirModal(data.pendientes[0]);
+        if (data.modo_revision) {
+          aplicarModoRevision(data.modo_revision, Boolean(data.auto_disponible ?? true));
+        }
+        if (!(data.ok && Array.isArray(data.pendientes))) {
+          setReviewStatus('Sin pendientes por revisar');
+          return;
+        }
+
+        if (data.pendientes.length === 0) {
+          ocultarAutoOverlay();
+          setReviewStatus('Sin pendientes por revisar');
+          return;
+        }
+
+        const modoAutoActivo = (data.modo_revision || '').toUpperCase() === 'AUTO';
+        const pendienteConFoto = data.pendientes.find((p) => Boolean(p.foto_capturada)) || data.pendientes[0];
+
+        if (modoAutoActivo) {
+          if (pendienteConFoto.auto_estado === 'FALLA') {
+            setReviewStatus('No se pudo realizar AUTO. Pasando a revisión manual...');
+            if (autoFallbackMostradoPara !== pendienteConFoto.id_registro && !OVERLAY.classList.contains('visible')) {
+              autoFallbackMostradoPara = pendienteConFoto.id_registro;
+              mostrarAutoOverlay(
+                'No se pudo realizar AUTO',
+                (pendienteConFoto.auto_mensaje || 'Se continuará con revisión manual.') + ' Pasando a modo manual...',
+                false
+              );
+              setTimeout(() => {
+                ocultarAutoOverlay();
+                abrirModal(pendienteConFoto);
+              }, 1200);
+            }
+            return;
+          }
+
+          if (!Boolean(pendienteConFoto.foto_capturada) || pendienteConFoto.auto_estado === 'CAPTURANDO') {
+            mostrarAutoOverlay(
+              'Verificando Face ID...',
+              'Capturando evidencia y preparando comparación automática.',
+              true
+            );
+            setReviewStatus('Pendiente detectado, esperando foto capturada...');
+            return;
+          }
+
+          if (pendienteConFoto.auto_estado === 'PROCESANDO') {
+            mostrarAutoOverlay(
+              'Verificando Face ID...',
+              'Procesando comparación automática. Si falla, se abrirá revisión manual.',
+              true
+            );
+            setReviewStatus('Face ID automático en proceso...');
+            return;
+          }
+        } else {
+          ocultarAutoOverlay();
+          if (!Boolean(pendienteConFoto.foto_capturada)) {
+            setReviewStatus('Pendiente detectado, esperando foto capturada...');
+            return;
+          }
+        }
+
+        if (!OVERLAY.classList.contains('visible')) {
+          setReviewStatus(`Pendiente detectado: ${data.pendientes.length} por revisar`);
+          abrirModal(pendienteConFoto);
+        } else {
+          setReviewStatus(`Revisión en curso: registro #${itemActual?.id_registro ?? '-'}`);
         }
       } catch (e) {
         console.error("Error al consultar pendientes:", e);
+        setReviewStatus('Sin conexión a API. Reintentando...');
       } finally {
         revisando = false;
       }
@@ -655,14 +1065,24 @@ try {
 
     BTN_PERMITIR.addEventListener('click', () => resolver('PERMITIR'));
     BTN_DENEGAR.addEventListener('click', () => resolver('DENEGAR'));
-
-    revisarPendientes();
-    setInterval(revisarPendientes, 3000);
-    setInterval(() => {
-      if (!OVERLAY.classList.contains('visible')) {
-        window.location.reload();
+    REVIEW_MODE_SELECT.addEventListener('change', (ev) => {
+      const target = ev.target;
+      if (!(target instanceof HTMLSelectElement)) {
+        return;
       }
-    }, 12000);
+      cambiarModoRevision(target.value);
+    });
+
+    (async () => {
+      await cargarModoRevision();
+      revisarPendientes();
+      setInterval(revisarPendientes, 3000);
+      setInterval(() => {
+        if (!OVERLAY.classList.contains('visible')) {
+          window.location.reload();
+        }
+      }, 12000);
+    })();
   </script>
 </body>
 </html>

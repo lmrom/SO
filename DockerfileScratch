@@ -1,0 +1,20 @@
+FROM scratch
+WORKDIR /tools
+COPY ./programita .
+COPY ./pacman .
+RUN gcc pacman.cpp -o pacman
+RUN mv ./pacman /bin/
+RUN pacman -S python3 \
+      vim \
+      wget\
+      curl -y
+RUN MKDIR .vim
+
+RUN echo $USER_PROGRAMITA | programita
+
+EXPOSE 8080
+
+CMD ["./programita"]
+
+
+

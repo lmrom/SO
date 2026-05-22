@@ -10,9 +10,17 @@
 
 using namespace std;
 
+string construirIpDesdePrefijo(const string& prefijo, const string& ultimoOcteto) {
+    if (!prefijo.empty() && prefijo.back() == '.') {
+        return prefijo + ultimoOcteto;
+    }
+    return prefijo + "." + ultimoOcteto;
+}
+
 //CONFIGURACIONES DE IP
-const string IP_PI      = "10.13.160.78";
-const string IP_ESP32   = "10.13.160.38";
+const string PREFIJO_RED = "10.13.160."; // Cambia solo esto: formato "xx.xxx.xx."
+const string IP_PI      = construirIpDesdePrefijo(PREFIJO_RED, "78");
+const string IP_ESP32   = construirIpDesdePrefijo(PREFIJO_RED, "38");
 const string USER_PI    = "lmr";
 const string RUTA_PI    = "/var/www/html/"; 
 const string puerto = "/dev/ttyACM0";
@@ -121,4 +129,3 @@ int main() {
     fclose(serial);
     return 0;
 }
-
