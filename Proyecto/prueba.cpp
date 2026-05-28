@@ -13,6 +13,11 @@
 
 using namespace std;
 
+/**
+ * Recibe: Un prefijo de red (string) y el último octeto (string).
+ * Hace: Concatena ambos para formar una dirección IP válida, asegurando que haya un punto de separación.
+ * Devuelve: La dirección IP completa como string.
+ */
 string construirIpDesdePrefijo(const string& prefijo, const string& ultimoOcteto) {
     if (!prefijo.empty() && prefijo.back() == '.') {
         return prefijo + ultimoOcteto;
@@ -21,12 +26,9 @@ string construirIpDesdePrefijo(const string& prefijo, const string& ultimoOcteto
 }
 
 //CONFIGURACIONES DE IP
-const string PREFIJO_RED_DEFAULT = "10.138.89.";
-const string PREFIJO_RED_ALT = "10.97.7.";
+const string PREFIJO_RED_DEFAULT = "10.63.184.";
 const string IP_PI_DEFAULT      = construirIpDesdePrefijo(PREFIJO_RED_DEFAULT, "78");
-const string IP_PI_ALT          = construirIpDesdePrefijo(PREFIJO_RED_ALT, "78");
 const string IP_ESP32_DEFAULT   = construirIpDesdePrefijo(PREFIJO_RED_DEFAULT, "38");
-const string IP_ESP32_ALT       = construirIpDesdePrefijo(PREFIJO_RED_ALT, "38");
 const string USER_PI    = "lumr";
 const string RUTA_PI    = "/var/www/html/"; 
 const string puertoPreferido = "/dev/ttyACM0";
@@ -40,6 +42,11 @@ const int REVISION_TIMEOUT_SEG = 45;
 const int REVISION_POLL_MS = 1000;
 
 
+/**
+ * Recibe: Una cadena de texto (string).
+ * Hace: Escapa las comillas simples para que la cadena sea segura al usarse en comandos de shell.
+ * Devuelve: La cadena procesada envuelta en comillas simples.
+ */
 string shellEscape(const string& input) {
     string out = "'";
     for (char c : input) {
@@ -50,6 +57,11 @@ string shellEscape(const string& input) {
     return out;
 }
 
+/**
+ * Recibe: Una cadena de texto (string).
+ * Hace: Elimina los espacios en blanco, tabulaciones y saltos de línea al inicio y al final.
+ * Devuelve: La cadena limpia (trimmed).
+ */
 string trim(const string& input) {
     size_t start = input.find_first_not_of(" \t\n\r");
     if (start == string::npos) return "";
@@ -57,6 +69,11 @@ string trim(const string& input) {
     return input.substr(start, end - start + 1);
 }
 
+/**
+ * Recibe: Un vector de strings con posibles duplicados o espacios.
+ * Hace: Limpia cada string y genera una lista sin elementos repetidos ni vacíos.
+ * Devuelve: Un vector de strings con valores únicos.
+ */
 vector<string> construirListaUnica(const vector<string>& in) {
     vector<string> out;
     for (const string& v : in) {
@@ -69,24 +86,39 @@ vector<string> construirListaUnica(const vector<string>& in) {
     return out;
 }
 
+/**
+ * Recibe: Nada.
+ * Hace: Intenta obtener la IP de la Raspberry Pi desde una variable de entorno o usa los valores por defecto.
+ * Devuelve: Un vector de strings con las IPs disponibles.
+ */
 vector<string> obtenerIpsPi() {
     const char* envPi = getenv("GATE_PI_IP");
     if (envPi != nullptr) {
         string ip = trim(envPi);
         if (!ip.empty()) return {ip};
     }
-    return construirListaUnica({IP_PI_DEFAULT, IP_PI_ALT});
+    return construirListaUnica({IP_PI_DEFAULT});
 }
 
+/**
+ * Recibe: Nada.
+ * Hace: Intenta obtener la IP del ESP32 desde una variable de entorno o usa los valores por defecto.
+ * Devuelve: Un vector de strings con las IPs disponibles.
+ */
 vector<string> obtenerIpsEsp32() {
     const char* envEsp = getenv("GATE_ESP32_IP");
     if (envEsp != nullptr) {
         string ip = trim(envEsp);
         if (!ip.empty()) return {ip};
     }
-    return construirListaUnica({IP_ESP32_DEFAULT, IP_ESP32_ALT});
+    return construirListaUnica({IP_ESP32_DEFAULT});
 }
 
+/**
+ * Recibe: Nada.
+ * Hace: Construye las URLs de la API basándose en las IPs de la Raspberry Pi disponibles.
+ * Devuelve: Un vector de strings con las URLs completas de la API.
+ */
 vector<string> obtenerApiUrls() {
     const char* envUrl = getenv("GATE_API_URL");
     if (envUrl != nullptr) {
@@ -103,6 +135,11 @@ vector<string> obtenerApiUrls() {
     return construirListaUnica(urls);
 }
 
+/**
+ * Recibe: Un comando de sistema (string).
+ * Hace: Ejecuta el comando mediante un pipe y captura su salida estándar.
+ * Devuelve: El contenido de la salida del comando como string.
+ */
 string ejecutarComandoYLeerSalida(const string& cmd) {
     array<char, 256> buffer{};
     string salida;
@@ -115,6 +152,11 @@ string ejecutarComandoYLeerSalida(const string& cmd) {
     return salida;
 }
 
+/**
+ * Recibe: Argumentos para el comando POST de curl (string) y un tiempo de espera (int).
+ * Hace: Intenta realizar la petición a las diferentes URLs de la API hasta obtener una respuesta.
+ * Devuelve: La respuesta del servidor como string o vacío si todas fallan.
+ */
 string postApiConFallback(const string& postArgs, int timeoutSeg = 7) {
     string lastResponse;
     for (const string& apiUrl : obtenerApiUrls()) {
@@ -129,6 +171,11 @@ string postApiConFallback(const string& postArgs, int timeoutSeg = 7) {
     return lastResponse;
 }
 
+/**
+ * Recibe: Un comando a ejecutar remotamente (string) y una referencia para el código de salida (int).
+ * Hace: Intenta ejecutar el comando vía SSH en las IPs de la Raspberry Pi disponibles.
+ * Devuelve: Booleano indicando si la ejecución fue exitosa (rc=0) en alguna de las IPs.
+ */
 bool ejecutarSshConFallback(const string& remoteCmd, int& outRc) {
     int lastRc = 1;
     for (const string& ipPi : obtenerIpsPi()) {
@@ -146,6 +193,11 @@ bool ejecutarSshConFallback(const string& remoteCmd, int& outRc) {
     return false;
 }
 
+/**
+ * Recibe: Una cadena JSON (string) y el nombre de un campo (string).
+ * Hace: Realiza un análisis manual básico para encontrar el valor de un campo de texto entre comillas.
+ * Devuelve: El valor del campo como string.
+ */
 string extraerCampoTextoJson(const string& json, const string& campo) {
     string clave = "\"" + campo + "\":\"";
     size_t inicio = json.find(clave);
@@ -156,6 +208,11 @@ string extraerCampoTextoJson(const string& json, const string& campo) {
     return json.substr(inicio, fin - inicio);
 }
 
+/**
+ * Recibe: Una cadena JSON (string) y el nombre de un campo (string).
+ * Hace: Busca y extrae un valor numérico asociado a la clave proporcionada.
+ * Devuelve: El valor como entero (int), o -1 si hay error.
+ */
 int extraerCampoEnteroJson(const string& json, const string& campo) {
     string clave = "\"" + campo + "\":";
     size_t inicio = json.find(clave);
@@ -172,6 +229,11 @@ int extraerCampoEnteroJson(const string& json, const string& campo) {
     }
 }
 
+/**
+ * Recibe: Una cadena JSON (string), el nombre de un campo (string) y una referencia para el valor (bool).
+ * Hace: Busca el valor booleano 'true' o 'false' para la clave indicada.
+ * Devuelve: Verdadero si se pudo extraer el campo con éxito, falso de lo contrario.
+ */
 bool extraerCampoBoolJson(const string& json, const string& campo, bool& valor) {
     string clave = "\"" + campo + "\":";
     size_t inicio = json.find(clave);
@@ -190,7 +252,27 @@ bool extraerCampoBoolJson(const string& json, const string& campo, bool& valor) 
     return false;
 }
 
+/**
+ * Recibe: Nada.
+ * Hace: Escanea el sistema buscando dispositivos seriales activos (/dev/ttyACM* o /dev/ttyUSB*).
+ * Devuelve: La ruta del puerto serial detectado o una cadena vacía si no encuentra ninguno.
+ */
 string detectarPuertoSerial() {
+    const vector<string> rutasSerialPersistentes = {
+        "/dev/serial/by-id",
+        "/dev/serial/by-path"
+    };
+    for (const auto& dir : rutasSerialPersistentes) {
+        if (!filesystem::exists(dir) || !filesystem::is_directory(dir)) continue;
+        for (const auto& entry : filesystem::directory_iterator(dir)) {
+            if (!entry.is_symlink() && !entry.is_character_file()) continue;
+            string ruta = filesystem::canonical(entry.path()).string();
+            if (ruta.rfind("/dev/ttyACM", 0) == 0 || ruta.rfind("/dev/ttyUSB", 0) == 0) {
+                return ruta;
+            }
+        }
+    }
+
     if (filesystem::exists(puertoPreferido)) return puertoPreferido;
 
     for (int i = 0; i <= 9; i++) {
@@ -204,6 +286,11 @@ string detectarPuertoSerial() {
     return "";
 }
 
+/**
+ * Recibe: Nada.
+ * Hace: Obtiene la hora actual del sistema y la formatea para su uso en nombres de archivos.
+ * Devuelve: Un string con formato "YYYY-MM-DD_HH-MM-SS".
+ */
 string obtenerFechaArchivo() {
     time_t ahora = time(0);
     struct tm tstruct;
@@ -212,7 +299,12 @@ string obtenerFechaArchivo() {
     strftime(buf, sizeof(buf), "%Y-%m-%d_%H-%M-%S", &tstruct);
     return string(buf);
 }
-//para el log
+
+/**
+ * Recibe: Nada.
+ * Hace: Obtiene la hora actual del sistema formateada para registros de log.
+ * Devuelve: Un string con formato "DD/MM/YYYY HH:MM:SS".
+ */
 string obtenerFechaLog() {
     time_t ahora = time(0);
     struct tm tstruct;
@@ -223,6 +315,11 @@ string obtenerFechaLog() {
 }
 
 
+/**
+ * Recibe: El UID de la tarjeta y referencias para autorización, revisión, motivo e ID de registro.
+ * Hace: Realiza una consulta POST a la API para verificar si el acceso está permitido o requiere supervisión.
+ * Devuelve: Booleano indicando si la comunicación con la API fue exitosa.
+ */
 bool consultarApiAcceso(const string& uid, bool& autorizado, bool& requiereRevision, string& motivo, int& idRegistro) {
     idRegistro = -1;
     requiereRevision = false;
@@ -260,6 +357,11 @@ bool consultarApiAcceso(const string& uid, bool& autorizado, bool& requiereRevis
     return true;
 }
 
+/**
+ * Recibe: El ID del registro y referencias para el estado de la revisión y motivos.
+ * Hace: Consulta la API para saber si un operador ya tomó una decisión sobre un acceso pendiente.
+ * Devuelve: Booleano indicando si la consulta a la API fue exitosa.
+ */
 bool consultarEstadoRevision(int idRegistro, bool& finalizada, bool& autorizadoFinal, string& revisionEstado, string& motivoRevision) {
     finalizada = false;
     autorizadoFinal = false;
@@ -285,6 +387,11 @@ bool consultarEstadoRevision(int idRegistro, bool& finalizada, bool& autorizadoF
     return true;
 }
 
+/**
+ * Recibe: ID del registro, decisión (aprobar/denegar) y nombre del revisor.
+ * Hace: Envía a la API la resolución de una revisión manual (usualmente por timeout).
+ * Devuelve: Booleano indicando si la operación fue exitosa en la API.
+ */
 bool resolverRevisionEnApi(int idRegistro, const string& decision, const string& revisor) {
     if (idRegistro <= 0) return false;
     string postArgs = "-d " + shellEscape("accion=RESOLVER_REVISION") +
@@ -298,11 +405,21 @@ bool resolverRevisionEnApi(int idRegistro, const string& decision, const string&
     return respuesta.find("\"ok\":true") != string::npos;
 }
 
+/**
+ * Recibe: Una ruta absoluta en el servidor remoto (string).
+ * Hace: Ejecuta un comando SSH para verificar si el archivo existe y tiene tamaño mayor a cero.
+ * Devuelve: Verdadero si el archivo existe en el remoto, falso si no.
+ */
 bool existeArchivoRemoto(const string& rutaAbsRemota) {
     int rc = 1;
     return ejecutarSshConFallback("test -s " + shellEscape(rutaAbsRemota), rc);
 }
 
+/**
+ * Recibe: ID del registro y la ruta relativa de la foto (string).
+ * Hace: Notifica a la API que se ha subido una foto para asociarla al registro de acceso.
+ * Devuelve: Booleano indicando si la asociación fue exitosa.
+ */
 bool adjuntarFotoEnApi(int idRegistro, const string& fotoRelativa) {
     if (idRegistro <= 0 || fotoRelativa.empty() || fotoRelativa == "SIN_FOTO") return false;
 
@@ -318,6 +435,11 @@ bool adjuntarFotoEnApi(int idRegistro, const string& fotoRelativa) {
     return respuesta.find("\"ok\":true") != string::npos;
 }
 
+/**
+ * Recibe: ID del registro y el motivo del fallo (string).
+ * Hace: Informa a la API sobre un error automático (ej. fallo de cámara) durante el proceso.
+ * Devuelve: Booleano indicando si la API registró el fallo correctamente.
+ */
 bool marcarFalloAutoEnApi(int idRegistro, const string& motivo) {
     if (idRegistro <= 0) return false;
 
@@ -334,6 +456,11 @@ bool marcarFalloAutoEnApi(int idRegistro, const string& motivo) {
 }
 
 
+/**
+ * Recibe: UID, datos preliminares de la API, ID de registro y el puntero al archivo serial.
+ * Hace: Orquesta todo el flujo: captura fotos del ESP32, las sube a la Pi vía SCP, gestiona la espera de revisiones manuales y finalmente envía la orden de apertura o denegación al Arduino.
+ * Devuelve: Nada (procedimiento de flujo).
+ */
 void procesarAcceso(const string& uid, bool autorizadoPreliminar, bool requiereRevision, const string& motivoApi, int idRegistro, FILE* serial) {
     string fechaArchivo = obtenerFechaArchivo();
     string fechaLog = obtenerFechaLog();   
@@ -481,6 +608,11 @@ void procesarAcceso(const string& uid, bool autorizadoPreliminar, bool requiereR
     cout << ">LISTO PAh<" << endl;
 }
 
+/**
+ * Recibe: Nada.
+ * Hace: Punto de entrada del programa. Configura el puerto serial, lo abre y entra en un bucle infinito escuchando las lecturas de UIDs del Arduino para procesar cada acceso.
+ * Devuelve: 0 si termina correctamente, 1 si hay errores fatales de configuración.
+ */
 int main() {
     string puerto = detectarPuertoSerial();
     if (puerto.empty()) {

@@ -1,0 +1,229 @@
+SISTEMA DE CONTROL DE ACCESO - PASO A PASO COMPLETO
+===================================================
+
+Este documento explica el flujo completo del sistema:
+1) desde que se presenta la credencial
+2) cómo se valida y cómo regresa la respuesta
+3) cómo y cuándo se guarda/actualiza en base de datos
+4) función de cada archivo principal (acceso, face_verify, index, prueba)
+
+
+------------------------------------------------------------
+FLUJO COMPLETO: DE LA CREDENCIAL AL RESULTADO FINAL
+------------------------------------------------------------
+
+Paso 0. Estado inicial
+- El programa C++ (prueba) está corriendo en la laptop/PC.
+- El Arduino está conectado por serial y envía UID cuando detecta tarjeta.
+- La Raspberry tiene corriendo nginx+php con acceso.php e index.php.
+- La base SQLite está en /var/www/html/audit.db.
+
+Paso 1. Lectura del UID desde Arduino (prueba.cpp)
+- prueba.cpp abre el puerto serial detectado (/dev/ttyACM* o /dev/ttyUSB*).
+- Lee líneas de texto del serial con fgets().
+- Limpia saltos de línea y toma eso como UID.
+
+Paso 2. Solicitud de validación a la API (acceso.php, acción VALIDAR)
+- prueba.cpp envía POST a:
+  http://IP_RASPBERRY/acceso.php
+- Campos enviados:
+  uid, id_puerta, tipo (ENTRADA/SALIDA), token (opcional).
+- Si hay más de una URL/IP configurada, intenta fallback (en tu caso actual ya está a una sola IP).
+
+Paso 3. Validaciones iniciales en acceso.php
+- Verifica método POST.
+- Verifica token si API_TOKEN está definido.
+- Valida parámetros básicos.
+- Verifica que la puerta exista en tabla Puertas.
+
+Paso 4. Búsqueda de credencial y persona
+- Busca UID en tabla Credenciales y relaciona con Personas.
+- Determina:
+  - uidRegistrado: si existe credencial.
+  - puertaActiva: si la puerta está activa.
+
+Paso 5. Decisión preliminar y estado de revisión
+- Si UID registrado y puerta activa:
+  - autorizado preliminar = true
+  - requiere_revision = true
+  - revision_estado = PENDIENTE
+  - motivo = REVISION_PENDIENTE
+- Si UID no existe o puerta inactiva:
+  - autorizado preliminar = false
+  - requiere_revision = false
+  - revision_estado = NO_REQUERIDA
+  - motivo = UID_NO_REGISTRADO o PUERTA_INACTIVA
+
+Paso 6. Antiduplicados
+- Antes de insertar, acceso.php revisa si ya existe un registro muy reciente
+  (ventana de segundos) para evitar insertar duplicados por múltiples lecturas
+  consecutivas del mismo UID.
+- Si detecta duplicado:
+  - NO inserta nuevo registro
+  - regresa el id_registro existente y su estado actual.
+
+Paso 7. Inserción en Accesos (si no fue duplicado)
+- Inserta en tabla Accesos:
+  id_persona, id_puerta, id_credencial, tipo, autorizado,
+  revision_estado, observacion.
+- observacion inicial guarda texto como:
+  "PERMITIDO_PRELIMINAR | UID: ... | Motivo: REVISION_PENDIENTE"
+  o equivalente de denegado.
+- Regresa JSON con id_registro y flags (autorizado, requiere_revision, etc.).
+
+Paso 8. Procesamiento local tras respuesta API (prueba.cpp)
+- prueba.cpp recibe JSON y determina estado inicial.
+- Captura foto desde ESP32-CAM por HTTP (endpoint /capture y fallback /).
+- Si logra capturar, guarda archivo local foto_YYYY-MM-DD_HH-MM-SS.jpg.
+
+Paso 9. Subida de foto a Raspberry
+- El programa crea carpeta destino remota (según estado):
+  - fotos/revision/
+  - fotos/autorizado/
+  - fotos/denegado/
+- Sube la foto vía SCP a /var/www/html/fotos/... .
+- Verifica existencia remota.
+
+Paso 10. Vincular foto al registro en DB (ADJUNTAR_FOTO)
+- Si hay id_registro válido y foto subida, prueba.cpp llama:
+  acción ADJUNTAR_FOTO con id_registro y foto_url relativa.
+- acceso.php actualiza observacion agregando:
+  " | Foto: fotos/.../archivo.jpg"
+
+Paso 11. Modo AUTO (si está activo en panel)
+- Dentro de ADJUNTAR_FOTO, si modo_revision = AUTO:
+  - acceso.php toma foto de referencia de Personas.foto_url
+  - toma foto capturada desde observacion
+  - llama servicio remoto face_verify (/verify) con ambas imágenes
+  - recibe match=true/false con score y threshold
+  - si resuelve:
+    - actualiza Accesos:
+      autorizado final, revision_estado(APROBADA/DENEGADA),
+      revision_comentario, revisado_por, fecha_revision, observacion
+  - además mueve la foto de revision a autorizado o denegado.
+
+Paso 12. Modo MANUAL (o AUTO no resuelto)
+- Si sigue en PENDIENTE, prueba.cpp entra en espera activa:
+  - consulta ESTADO_REVISION cada segundo.
+- Si el operador decide en panel:
+  - index.php llama RESOLVER_REVISION (PERMITIR o DENEGAR).
+- Si vence timeout en C++:
+  - prueba.cpp llama RESOLVER_REVISION con DENEGAR automático.
+
+Paso 13. Resolución manual en API (RESOLVER_REVISION)
+- acceso.php valida que el registro siga PENDIENTE.
+- Aplica resultado:
+  - autorizado = 1 o 0
+  - revision_estado = APROBADA o DENEGADA
+  - revision_comentario y revisado_por
+  - fecha_revision actual
+  - observacion con texto de revisión
+- Mueve foto desde fotos/revision/ hacia:
+  - fotos/autorizado/ si PERMITIR
+  - fotos/denegado/ si DENEGAR
+- Actualiza observacion con la nueva ruta de foto.
+
+Paso 14. Respuesta final al Arduino
+- Cuando prueba.cpp ya tiene decisión final:
+  - envía '1' por serial si autorizado
+  - envía '2' por serial si denegado
+- Ese byte controla la acción física (abrir o negar).
+
+Paso 15. Registro auxiliar y limpieza
+- prueba.cpp escribe log de texto remoto en:
+  /var/www/html/log.txt
+- Borra foto temporal local en la laptop/PC.
+
+
+------------------------------------------------------------
+CÓMO SE GUARDA EN BASE DE DATOS (RESUMEN)
+------------------------------------------------------------
+
+Tabla principal de eventos: Accesos
+- Se inserta en VALIDAR (nuevo evento o duplicado detectado).
+- Campos clave:
+  id_registro, id_persona, id_puerta, id_credencial, tipo,
+  fecha_hora, autorizado, revision_estado, revision_comentario,
+  revisado_por, fecha_revision, observacion.
+
+Estados importantes de revision_estado
+- NO_REQUERIDA: decisión final inmediata (sin revisión).
+- PENDIENTE: espera de revisión manual o automática.
+- APROBADA: revisión final aprobó acceso.
+- DENEGADA: revisión final denegó acceso.
+
+Actualizaciones típicas por etapas
+1) VALIDAR:
+   INSERT en Accesos.
+2) ADJUNTAR_FOTO:
+   UPDATE observacion (agrega ruta foto).
+3) AUTO (si aplica):
+   UPDATE autorizado, revision_estado, revision_comentario, revisado_por,
+   fecha_revision, observacion.
+4) RESOLVER_REVISION manual:
+   UPDATE autorizado, revision_estado, revision_comentario, revisado_por,
+   fecha_revision, observacion.
+
+Fotos de referencia de persona
+- Se guardan en Personas.foto_url como ruta relativa web, por ejemplo:
+  fotos/db/0244281.jpg
+- No se guarda /var/www/html en DB, solo la ruta relativa.
+
+
+------------------------------------------------------------
+FUNCIÓN DE CADA ARCHIVO PRINCIPAL
+------------------------------------------------------------
+
+1) prueba.cpp
+- Es el orquestador en tiempo real.
+- Lee UID por serial del Arduino.
+- Llama a la API para VALIDAR.
+- Captura foto desde ESP32.
+- Sube foto a Raspberry (SCP + SSH).
+- Adjunta foto al registro (ADJUNTAR_FOTO).
+- Si hay revisión pendiente, consulta estado o resuelve por timeout.
+- Envía decisión final al Arduino ('1' o '2').
+- Escribe log auxiliar en la Raspberry.
+
+2) api/acceso.php
+- Es la API central del sistema.
+- Atiende acciones POST:
+  VALIDAR, ADJUNTAR_FOTO, LISTAR_PENDIENTES, RESOLVER_REVISION,
+  ESTADO_REVISION, MARCAR_FALLO_AUTO, OBTENER_MODO_REVISION, CAMBIAR_MODO_REVISION.
+- Aplica reglas de negocio de autorización y revisión.
+- Inserta y actualiza registros en SQLite (audit.db).
+- Integra validación facial automática remota cuando modo AUTO está activo.
+- Administra movimiento de fotos de revisión a carpeta final.
+
+3) api/index.php
+- Es el panel web operativo.
+- Muestra tablero de accesos, métricas del día y estado del sistema.
+- Consulta la API periódicamente para listar pendientes.
+- Permite decidir manualmente PERMITIR/DENEGAR.
+- Permite cambiar el modo de revisión MANUAL/AUTO.
+- Refresca interfaz y muestra evidencia/fotos para decisión.
+
+4) api/face_verify_server_cpp.cpp
+- Servicio HTTP de comparación facial (OpenCV + C++).
+- Endpoints:
+  GET /health
+  POST /verify (multipart con reference y captured).
+- Proceso:
+  - Detecta rostro (Haar cascade)
+  - Preprocesa imagen de rostro
+  - Calcula similitud por histograma y ORB
+  - Combina score y compara con threshold
+- Responde JSON con:
+  ok, match, score, distance, threshold, engine.
+- acceso.php lo consume para resolver revisiones en modo AUTO.
+
+
+------------------------------------------------------------
+NOTAS OPERATIVAS IMPORTANTES
+------------------------------------------------------------
+
+- Si AUTO no responde, el sistema puede seguir en MANUAL.
+- Si la foto no se adjunta o no se puede mover, quedará trazado en observacion/revision_comentario.
+- Si el lector dispara UID repetido rápido, el anti-duplicado evita insertar múltiples filas.
+- La decisión física final siempre la emite prueba.cpp al Arduino con un byte serial.
+

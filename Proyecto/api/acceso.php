@@ -8,7 +8,7 @@ const API_TOKEN = ''; // opcional: si no quieres token, dejalo vacio
 const IDENTIFICADOR_SISTEMA = 'SYS-DENEGADO';
 const WEB_ROOT = '/var/www/html';
 const REVISION_MODE_FILE = WEB_ROOT . '/revision_mode.json';
-const FACE_VERIFY_REMOTE_URL = 'http://10.138.89.19:5050/verify'; // servicio C++ en laptop
+const FACE_VERIFY_REMOTE_URL = 'http://10.63.184.19:5050/verify'; // servicio C++ en laptop
 const FACE_VERIFY_REMOTE_TOKEN = ''; // opcional, mismo valor que en el server C++
 const FACE_VERIFY_THRESHOLD = 0.58;
 const FACE_VERIFY_TIMEOUT_SEG = 8;
@@ -142,6 +142,59 @@ function quitarFotoEnObservacion(string $observacion): string {
 
 function quitarRevisionEnObservacion(string $observacion): string {
     return preg_replace('/\s+\|\s+Revision:\s+.*$/u', '', $observacion) ?? $observacion;
+}
+
+function moverFotoSegunRevision(string $observacion, bool $autorizado): array {
+    $fotoPublica = extraerFotoDesdeObservacion($observacion);
+    if ($fotoPublica === null) {
+        return ['observacion' => $observacion, 'foto_movida' => false];
+    }
+
+    $fotoRelativa = ltrim($fotoPublica, '/');
+    if (!str_starts_with($fotoRelativa, 'fotos/revision/')) {
+        return ['observacion' => $observacion, 'foto_movida' => false];
+    }
+
+    $rutaOrigen = resolverRutaLocal($fotoRelativa);
+    if ($rutaOrigen === null || !is_file($rutaOrigen)) {
+        return ['observacion' => $observacion, 'foto_movida' => false];
+    }
+
+    $subcarpetaDestino = $autorizado ? 'fotos/autorizado' : 'fotos/denegado';
+    $rutaDirDestino = WEB_ROOT . '/' . $subcarpetaDestino;
+    if (!is_dir($rutaDirDestino) && !mkdir($rutaDirDestino, 0775, true) && !is_dir($rutaDirDestino)) {
+        return ['observacion' => $observacion, 'foto_movida' => false];
+    }
+
+    $nombreArchivo = basename($fotoRelativa);
+    $fotoDestinoRel = $subcarpetaDestino . '/' . $nombreArchivo;
+    $rutaDestino = WEB_ROOT . '/' . $fotoDestinoRel;
+    if (is_file($rutaDestino)) {
+        $info = pathinfo($nombreArchivo);
+        $base = (string)($info['filename'] ?? 'foto');
+        $ext = isset($info['extension']) ? ('.' . $info['extension']) : '';
+        $fotoDestinoRel = $subcarpetaDestino . '/' . $base . '_' . date('Ymd_His') . $ext;
+        $rutaDestino = WEB_ROOT . '/' . $fotoDestinoRel;
+    }
+
+    $movida = @rename($rutaOrigen, $rutaDestino);
+    if (!$movida) {
+        $movida = @copy($rutaOrigen, $rutaDestino);
+        if ($movida) {
+            @unlink($rutaOrigen);
+        }
+    }
+    if (!$movida) {
+        return ['observacion' => $observacion, 'foto_movida' => false];
+    }
+
+    $observacionSinFoto = quitarFotoEnObservacion($observacion);
+    $observacionNueva = rtrim($observacionSinFoto) . ' | Foto: ' . $fotoDestinoRel;
+    return [
+        'observacion' => $observacionNueva,
+        'foto_movida' => true,
+        'foto_url' => normalizarRutaPublica($fotoDestinoRel)
+    ];
 }
 
 function extraerMotivoDesdeObservacion(string $observacion): string {
@@ -584,7 +637,9 @@ try {
                         }
 
                         $obsBaseAuto = quitarRevisionEnObservacion((string)($datoAuto['observacion'] ?? ''));
-                        $obsNuevaAuto = rtrim($obsBaseAuto) . ' | Revision: ' . $comentario;
+                        $movFotoAuto = moverFotoSegunRevision($obsBaseAuto, $match);
+                        $obsConFotoFinal = (string)($movFotoAuto['observacion'] ?? $obsBaseAuto);
+                        $obsNuevaAuto = rtrim(quitarRevisionEnObservacion($obsConFotoFinal)) . ' | Revision: ' . $comentario;
 
                         $stUpdAuto = $pdo->prepare(
                             "UPDATE Accesos
@@ -783,7 +838,9 @@ try {
             : 'DENEGADO despues de revision';
 
         $observacionBase = quitarRevisionEnObservacion((string)($registro['observacion'] ?? ''));
-        $observacionNueva = rtrim($observacionBase) . ' | Revision: ' . $comentarioRevision;
+        $movFotoRevision = moverFotoSegunRevision($observacionBase, $autorizadoFinal === 1);
+        $observacionConFoto = (string)($movFotoRevision['observacion'] ?? $observacionBase);
+        $observacionNueva = rtrim(quitarRevisionEnObservacion($observacionConFoto)) . ' | Revision: ' . $comentarioRevision;
 
         $stUpd = $pdo->prepare(
             'UPDATE Accesos

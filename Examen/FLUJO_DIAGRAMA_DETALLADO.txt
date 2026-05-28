@@ -1,0 +1,361 @@
+GUIA DETALLADA PARA DIAGRAMA DE FLUJO DEL SISTEMA
+=================================================
+
+Objetivo:
+Este documento describe, en formato secuencial y con decisiones explícitas,
+el funcionamiento del sistema desde la lectura de una credencial RFID hasta
+la respuesta final al Arduino y el registro persistente en base de datos.
+
+Actores / Bloques para el diagrama:
+1) Arduino (lector RFID + actuador de puerta)
+2) Programa C++ (prueba.cpp)
+3) ESP32-CAM
+4) API en Raspberry (acceso.php)
+5) Servicio Face Verify (face_verify_server_cpp)
+6) Panel Web (index.php, operador)
+7) Base de datos SQLite (audit.db)
+
+
+------------------------------------------------------------
+A) FLUJO PRINCIPAL (CREDENCIAL -> DECISION FINAL)
+------------------------------------------------------------
+
+Nodo A0: Inicio del sistema
+Entrada:
+- Programa prueba.cpp ejecutándose.
+- Puerto serial detectado y abierto.
+- API accesible en Raspberry.
+Proceso:
+- prueba.cpp entra en bucle de escucha serial.
+Salida:
+- Sistema en estado "esperando UID".
+
+Nodo A1: Espera de UID
+Entrada:
+- Datos desde serial Arduino.
+Proceso:
+- Lee línea del puerto serial.
+- Elimina \n y \r.
+Decision D1:
+- UID vacío o inválido?
+  - Sí -> regresar a A1.
+  - No -> continuar a A2.
+
+Nodo A2: Solicitud de validación inicial a API
+Entrada:
+- uid, id_puerta, tipo.
+Proceso:
+- prueba.cpp envía POST a acceso.php (acción implícita VALIDAR).
+Salida:
+- JSON de respuesta de API.
+
+Nodo A3: Parseo de respuesta de VALIDAR
+Entrada:
+- JSON API.
+Proceso:
+- Obtiene: autorizado preliminar, requiere_revision, motivo, id_registro.
+Decision D2:
+- API respondió correctamente?
+  - No -> marcar motivo ERROR_API o SIN_RESPUESTA_API, continuar flujo local con denegado.
+  - Sí -> continuar con estado recibido.
+
+Nodo A4: Determinación de estado inicial
+Proceso:
+- Si requiere_revision = true -> estado inicial REVISION_PENDIENTE.
+- Si autorizado preliminar = true y no requiere revisión -> AUTORIZADO final directo.
+- Si autorizado preliminar = false y no requiere revisión -> DENEGADO final directo.
+Salida:
+- Estado inicial del evento.
+
+Nodo A5: Captura de foto
+Entrada:
+- Estado inicial, UID, timestamp.
+Proceso:
+- prueba.cpp intenta captura en ESP32-CAM por HTTP.
+- Guarda foto local temporal (foto_YYYY-MM-DD_HH-MM-SS.jpg).
+Decision D3:
+- Foto capturada con éxito?
+  - No -> ir a A10 (flujo sin foto; marcar fallo auto si aplica).
+  - Sí -> continuar a A6.
+
+Nodo A6: Preparación de carpeta remota y subida SCP
+Entrada:
+- Foto local.
+- Subcarpeta destino según estado inicial:
+  - revision/
+  - autorizado/
+  - denegado/
+Proceso:
+- Crea carpeta remota por SSH mkdir -p.
+- Sube foto con SCP a /var/www/html/fotos/{subcarpeta}/.
+Decision D4:
+- Subida y verificación remota correctas?
+  - No -> registrar warning, ir a A10.
+  - Sí -> continuar a A7.
+
+Nodo A7: Adjuntar foto al registro
+Entrada:
+- id_registro, foto_url relativa.
+Proceso:
+- prueba.cpp envía ADJUNTAR_FOTO a acceso.php.
+- acceso.php actualiza observacion en Accesos con "Foto: fotos/...jpg".
+Salida:
+- Registro ya vinculado con evidencia fotográfica.
+
+Nodo A8: Decision por tipo de revisión
+Decision D5:
+- requiere_revision = false?
+  - Sí -> ir a A13 (respuesta final directa al Arduino).
+  - No -> ir a A9 (espera de resolución).
+
+Nodo A9: Espera de resolución de revisión
+Proceso:
+- prueba.cpp consulta ESTADO_REVISION cada segundo.
+- Límite de espera: REVISION_TIMEOUT_SEG.
+Decision D6:
+- Se resolvió antes del timeout?
+  - Sí -> tomar autorizado_final desde API, ir a A13.
+  - No -> ejecutar resolución automática por timeout (DENEGAR), ir a A12.
+
+Nodo A10: Ruta de error de foto
+Proceso:
+- Si requiere_revision=true y hay id_registro:
+  - prueba.cpp llama MARCAR_FALLO_AUTO en API.
+- Continúa flujo sin evidencia confirmada.
+Decision D7:
+- requiere_revision?
+  - Sí -> ir a A9 (espera de resolución).
+  - No -> ir a A13 (respuesta final directa).
+
+Nodo A11: Resolución por operador (panel)
+Este nodo ocurre en paralelo al A9.
+Proceso:
+- Operador ve pendiente en index.php.
+- Selecciona PERMITIR o DENEGAR.
+- index.php llama RESOLVER_REVISION en API.
+Salida:
+- Accesos actualizado a APROBADA o DENEGADA.
+- Foto movida de revision/ a autorizado/ o denegado/.
+
+Nodo A12: Resolución por timeout desde C++
+Proceso:
+- prueba.cpp llama RESOLVER_REVISION con DENEGAR y revisor AUTO_TIMEOUT_CPP.
+Salida:
+- API cierra revisión como DENEGADA si seguía pendiente.
+
+Nodo A13: Respuesta final al Arduino
+Entrada:
+- autorizado_final.
+Proceso:
+- Si autorizado_final=true -> enviar byte '1'.
+- Si autorizado_final=false -> enviar byte '2'.
+Salida:
+- Acción física en cerradura/puerta.
+
+Nodo A14: Log auxiliar y limpieza
+Proceso:
+- prueba.cpp escribe log en /var/www/html/log.txt por SSH.
+- Elimina foto temporal local.
+Salida:
+- Flujo de un evento completado.
+- Regresa al bucle A1.
+
+
+------------------------------------------------------------
+B) SUBFLUJO DETALLADO DE VALIDAR (acceso.php)
+------------------------------------------------------------
+
+Nodo B0: Recepción POST VALIDAR
+Entrada:
+- uid, id_puerta, tipo, token.
+Decision DB1:
+- Método o token inválido?
+  - Sí -> error 405/401.
+  - No -> continuar.
+
+Nodo B1: Validación de puerta
+Decision DB2:
+- Puerta existe?
+  - No -> responder PUERTA_NO_EXISTE.
+  - Sí -> continuar.
+
+Nodo B2: Buscar credencial por UID
+Proceso:
+- Join Credenciales + Personas.
+Decision DB3:
+- UID registrado?
+  - Sí -> id_persona real, id_credencial real.
+  - No -> usa persona sistema "SYS-DENEGADO".
+
+Nodo B3: Calcular flags de negocio
+Proceso:
+- puertaActiva = Puertas.activo.
+- autorizadoPreliminar = uidRegistrado && puertaActiva.
+- requiereRevision = uidRegistrado && puertaActiva.
+- revision_estado = PENDIENTE o NO_REQUERIDA.
+- motivo = REVISION_PENDIENTE / UID_NO_REGISTRADO / PUERTA_INACTIVA.
+
+Nodo B4: Anti-duplicado por ventana temporal
+Proceso:
+- Busca registro similar reciente (UID/credencial, puerta, tipo, segundos).
+Decision DB4:
+- Duplicado encontrado?
+  - Sí -> responde con id_registro existente y termina VALIDAR.
+  - No -> continuar.
+
+Nodo B5: Insert en Accesos
+Proceso:
+- INSERT con campos base y observacion inicial.
+- COMMIT.
+Salida:
+- id_registro nuevo.
+- JSON al C++.
+
+
+------------------------------------------------------------
+C) SUBFLUJO ADJUNTAR_FOTO + AUTO FACE (acceso.php)
+------------------------------------------------------------
+
+Nodo C0: Recepción ADJUNTAR_FOTO
+Entrada:
+- id_registro, foto_url.
+Decision DC1:
+- Parámetros válidos?
+  - No -> error PARAMETROS_FOTO_INVALIDOS.
+  - Sí -> continuar.
+
+Nodo C1: Actualizar observacion con foto
+Proceso:
+- Reemplaza/añade segmento "Foto: ...".
+
+Nodo C2: Leer modo de revisión
+Decision DC2:
+- modo_revision == AUTO?
+  - No -> responder FOTO_ADJUNTADA.
+  - Sí -> continuar auto face.
+
+Nodo C3: Validar precondiciones AUTO
+Decision DC3:
+- registro sigue PENDIENTE y existen foto referencia + foto capturada?
+  - No -> marcar AUTO_FALLA y responder.
+  - Sí -> continuar.
+
+Nodo C4: Llamada a face_verify_server_cpp
+Proceso:
+- POST /verify con reference + captured (+threshold/token opcional).
+Decision DC4:
+- Servicio respondió ok?
+  - No -> marcar AUTO_FALLA y responder.
+  - Sí -> evaluar match.
+
+Nodo C5: Resolver automático
+Proceso:
+- match=true -> APROBADA/autorizado=1.
+- match=false -> DENEGADA/autorizado=0.
+- Actualiza revision_estado, revision_comentario, revisado_por, fecha_revision.
+- Mueve foto de fotos/revision/ a autorizado/ o denegado/.
+
+Nodo C6: Respuesta ADJUNTAR_FOTO
+Salida:
+- JSON con auto_revision (intentada, resuelta, match, etc.).
+
+
+------------------------------------------------------------
+D) SUBFLUJO RESOLVER_REVISION MANUAL (acceso.php + index.php)
+------------------------------------------------------------
+
+Nodo D0: Panel detecta pendientes (index.php)
+Proceso:
+- Poll cada ~3s a LISTAR_PENDIENTES.
+- Muestra tarjetas con foto y datos.
+
+Nodo D1: Operador decide
+Entrada:
+- Botón PERMITIR o DENEGAR.
+Proceso:
+- POST RESOLVER_REVISION con id_registro, decision, revisor.
+
+Nodo D2: Validación de estado actual
+Decision DD1:
+- Registro sigue PENDIENTE?
+  - No -> responder REVISION_YA_RESUELTA.
+  - Sí -> continuar.
+
+Nodo D3: Aplicar resolución
+Proceso:
+- autorizado=1/0.
+- revision_estado=APROBADA/DENEGADA.
+- revision_comentario y revisado_por.
+- fecha_revision=CURRENT_TIMESTAMP.
+- mover foto desde revision/ a carpeta final.
+- actualizar observacion con nueva ruta.
+
+Nodo D4: Respuesta al panel
+Salida:
+- JSON REVISION_RESUELTA.
+- En siguiente poll, C++ ve finalizada y actúa.
+
+
+------------------------------------------------------------
+E) SALIDAS Y ESTADOS PARA EL DIAGRAMA
+------------------------------------------------------------
+
+Estados recomendados de caja en el diagrama:
+- ESPERANDO_UID
+- VALIDACION_API
+- CAPTURA_FOTO
+- FOTO_SUBIDA
+- REVISION_PENDIENTE
+- REVISION_APROBADA
+- REVISION_DENEGADA
+- RESPUESTA_ARDUINO_1
+- RESPUESTA_ARDUINO_2
+- ERROR_API
+- ERROR_FOTO
+- TIMEOUT_REVISION
+
+Eventos recomendados de transición:
+- UID_LEIDO
+- API_OK / API_ERROR
+- FOTO_OK / FOTO_FAIL
+- SCP_OK / SCP_FAIL
+- RESOLUCION_MANUAL
+- RESOLUCION_AUTO
+- TIMEOUT
+
+
+------------------------------------------------------------
+F) PUNTOS CRITICOS (PARA MARCAR EN EL DIAGRAMA)
+------------------------------------------------------------
+
+1) Anti-duplicado en VALIDAR:
+- Evita registros repetidos cuando el lector dispara múltiples veces.
+
+2) Separación entre autorizado preliminar y autorizado final:
+- Preliminar puede entrar en PENDIENTE.
+- Final se define por revisión manual/auto.
+
+3) Evidencia fotográfica:
+- Se adjunta al registro y puede moverse de carpeta al resolver.
+
+4) Fallback de revisión:
+- Si no hay decisión manual a tiempo, C++ cierra por timeout.
+
+5) Respuesta física:
+- El byte serial al Arduino es el cierre real del proceso.
+
+
+------------------------------------------------------------
+G) ORDEN SUGERIDO PARA DIBUJAR EL DIAGRAMA
+------------------------------------------------------------
+
+1) Dibuja carriles (swimlanes): Arduino | C++ | ESP32 | API | FaceVerify | Panel | DB.
+2) Coloca A0->A14 en el carril principal C++.
+3) Inserta subflujos B, C y D en carriles API/DB/Panel/FaceVerify.
+4) Marca decisiones D1..D7, DB1..DB4, DC1..DC4, DD1 con rombos.
+5) Marca bucles:
+- A1 (espera UID)
+- A9 (poll de revisión)
+- D0 (poll de pendientes en panel)
+6) Resalta nodos de error y timeout con color distinto.
+
